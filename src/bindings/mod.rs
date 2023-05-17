@@ -3,19 +3,17 @@ mod convert;
 mod droppable_value;
 mod value;
 
-use std::{
-    ffi::CString,
-    os::raw::{c_int, c_void},
-    sync::Mutex,
-};
+use std::collections::HashMap;
+use std::ffi::CString;
+use std::os::raw::{c_int, c_void};
+use std::sync::Mutex;
 
 use libquickjspp_sys as q;
+use libquickjspp_sys::JSObject;
 
-use crate::{
-    callback::{Arguments, Callback},
-    console::ConsoleBackend,
-    ContextError, ExecutionError, JsValue, ValueError,
-};
+use crate::callback::{Arguments, Callback};
+use crate::console::ConsoleBackend;
+use crate::{ContextError, ExecutionError, JsValue, ValueError};
 
 use value::{JsFunction, OwnedJsObject};
 
@@ -509,7 +507,7 @@ impl ContextWrapper {
     }
 
     /// Returns `Result::Err` when an error ocurred.
-    pub(crate) fn ensure_no_excpetion(&self) -> Result<(), ExecutionError> {
+    pub(crate) fn ensure_no_exception(&self) -> Result<(), ExecutionError> {
         if let Some(e) = self.get_exception() {
             Err(e)
         } else {
@@ -599,8 +597,8 @@ impl ContextWrapper {
     }
 
     /// Evaluate javascript code.
-    pub fn eval<'a>(&'a self, code: &str) -> Result<OwnedJsValue<'a>, ExecutionError> {
-        let filename = "script.js";
+    pub fn eval(&self, code: &str) -> Result<OwnedJsValue, ExecutionError> {
+        let filename = "<external>";
         let filename_c = make_cstring(filename)?;
         let code_c = make_cstring(code)?;
 
@@ -611,6 +609,24 @@ impl ContextWrapper {
                 code.len(),
                 filename_c.as_ptr(),
                 q::JS_EVAL_TYPE_GLOBAL as i32,
+            )
+        };
+        let value = OwnedJsValue::new(self, value_raw);
+        self.resolve_value(value)
+    }
+
+    pub fn eval_mod(&self, code: &str) -> Result<OwnedJsValue, ExecutionError> {
+        let filename = "<external>";
+        let filename_c = make_cstring(filename)?;
+        let code_c = make_cstring(code)?;
+
+        let value_raw = unsafe {
+            q::JS_Eval(
+                self.context,
+                code_c.as_ptr(),
+                code.len(),
+                filename_c.as_ptr(),
+                q::JS_EVAL_TYPE_MODULE as i32,
             )
         };
         let value = OwnedJsValue::new(self, value_raw);
@@ -689,10 +705,10 @@ impl ContextWrapper {
     }
 
     /// Add a global JS function that is backed by a Rust function or closure.
-    pub fn create_callback<'a, F>(
-        &'a self,
+    pub fn create_callback<F>(
+        &self,
         callback: impl Callback<F> + 'static,
-    ) -> Result<JsFunction<'a>, ExecutionError> {
+    ) -> Result<JsFunction, ExecutionError> {
         let argcount = callback.argument_count() as i32;
 
         let context = self.context;
@@ -737,6 +753,30 @@ impl ContextWrapper {
         let cfunc = self.create_callback(callback)?;
         let global = self.global()?;
         global.set_property(name, cfunc.into_value())?;
+        Ok(())
+    }
+
+    pub fn add_callback_to_namespace<'a, F>(
+        &'a self,
+        namespace: &str,
+        name: &str,
+        callback: impl Callback<F> + 'static,
+    ) -> Result<(), ExecutionError> {
+        let global = self.global()?;
+        let namespace_object = match global.property_require(namespace) {
+            Ok(o) => o,
+            Err(_) => {
+                let namespace_object = JsValue::Object(HashMap::new());
+                let owned_namespace_object = self.serialize_value(namespace_object)?;
+                global.set_property(namespace, owned_namespace_object)?;
+                global.property_require(namespace)?
+            }
+        };
+
+        let cfunc = self.create_callback(callback)?;
+        namespace_object
+            .try_into_object()?
+            .set_property(name, cfunc.into_value())?;
         Ok(())
     }
 }

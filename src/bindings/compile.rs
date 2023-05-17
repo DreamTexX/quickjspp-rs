@@ -4,7 +4,8 @@ use crate::ExecutionError;
 use libquickjspp_sys as q;
 use std::os::raw::c_void;
 
-use super::{make_cstring, value::JsCompiledFunction, ContextWrapper, OwnedJsValue};
+use super::value::JsCompiledFunction;
+use super::{make_cstring, ContextWrapper, OwnedJsValue};
 
 /// compile a script, will result in a JSValueRef with tag JS_TAG_FUNCTION_BYTECODE or JS_TAG_MODULE.
 ///  It can be executed with run_compiled_function().
@@ -28,7 +29,7 @@ pub fn compile<'a>(
     };
 
     // check for error
-    context.ensure_no_excpetion()?;
+    context.ensure_no_exception()?;
     Ok(value)
 }
 
@@ -45,7 +46,7 @@ pub fn run_compiled_function<'a>(
         OwnedJsValue::new(context, v)
     };
 
-    context.ensure_no_excpetion().map_err(|e| {
+    context.ensure_no_exception().map_err(|e| {
         if let ExecutionError::Internal(msg) = e {
             ExecutionError::Internal(format!("Could not evaluate compiled function: {}", msg))
         } else {

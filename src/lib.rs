@@ -38,12 +38,12 @@ mod value;
 #[cfg(test)]
 mod tests;
 
-use std::{convert::TryFrom, error, fmt};
+use libquickjspp_sys::JSObject;
+use std::convert::TryFrom;
+use std::{error, fmt};
 
-pub use self::{
-    callback::{Arguments, Callback},
-    value::*,
-};
+pub use self::callback::{Arguments, Callback};
+pub use self::value::*;
 
 /// Error on Javascript execution.
 #[derive(PartialEq, Debug)]
@@ -241,6 +241,13 @@ impl Context {
         Ok(value)
     }
 
+    /// Evaluates Javascript module code and returns the value of the final expression
+    pub fn eval_mod(&self, code: &str) -> Result<JsValue, ExecutionError> {
+        let value_raw = self.wrapper.eval_mod(code)?;
+        let value = value_raw.to_value()?;
+        Ok(value)
+    }
+
     /// Evaluates Javascript code and returns the value of the final expression
     /// as a Rust type.
     ///
@@ -368,5 +375,17 @@ impl Context {
         callback: impl Callback<F> + 'static,
     ) -> Result<(), ExecutionError> {
         self.wrapper.add_callback(name, callback)
+    }
+
+    /// Exact the same as `add_callback`, but allows you to specify a namespace (object inside the
+    /// global object) to add the callback to.
+    pub fn add_callback_to_namespace<F>(
+        &self,
+        namespace: &str,
+        name: &str,
+        callback: impl Callback<F> + 'static,
+    ) -> Result<(), ExecutionError> {
+        self.wrapper
+            .add_callback_to_namespace(namespace, name, callback)
     }
 }
