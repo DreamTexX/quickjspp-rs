@@ -1,4 +1,4 @@
-use std::os::raw::c_int;
+use std::{collections::HashMap, os::raw::c_int};
 
 use anyhow::Result;
 use libquickjspp_sys as q;
@@ -40,3 +40,5 @@ pub(super) fn exec_callback<F>(
 }
 
 pub type CustomCallback = fn(*mut q::JSContext, &[q::JSValue]) -> Result<Option<q::JSValue>>;
+pub type CustomCallbackWithResource<R> =
+    fn(*mut q::JSContext, &[q::JSValue], resource: R) -> Result<Option<q::JSValue>>;

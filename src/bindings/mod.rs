@@ -11,6 +11,7 @@ mod value;
 use std::{
     ffi::CString,
     os::raw::{c_int, c_void},
+    panic::UnwindSafe,
     ptr::null_mut,
     sync::{Arc, Mutex},
 };
@@ -527,7 +528,6 @@ impl ContextWrapper {
         Ok(())
     }
 
-    /// Create a raw callback function
     pub fn create_custom_callback(
         &self,
         callback: CustomCallback,
@@ -537,6 +537,70 @@ impl ContextWrapper {
             let result = std::panic::catch_unwind(|| {
                 let arg_slice = unsafe { std::slice::from_raw_parts(argv, argc as usize) };
                 match callback(context, arg_slice) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => unsafe { q::JS_NewSpecialValue(TAG_UNDEFINED, 0) },
+                    // TODO: better error reporting.
+                    Err(e) => {
+                        // TODO: should create an Error type.
+                        let js_exception_value = e.to_string().into();
+                        let js_exception =
+                            convert::serialize_value(context, js_exception_value).unwrap();
+                        unsafe {
+                            q::JS_Throw(context, js_exception);
+                        }
+
+                        unsafe { q::JS_NewSpecialValue(TAG_EXCEPTION, 0) }
+                    }
+                }
+            });
+
+            match result {
+                Ok(v) => v,
+                Err(_) => {
+                    // TODO: should create an Error type.
+                    let js_exception_value =
+                        ExecutionError::Internal("Callback panicked!".to_string())
+                            .to_string()
+                            .into();
+                    let js_exception =
+                        convert::serialize_value(context, js_exception_value).unwrap();
+                    unsafe {
+                        q::JS_Throw(context, js_exception);
+                    }
+
+                    unsafe { q::JS_NewSpecialValue(TAG_EXCEPTION, 0) }
+                }
+            }
+        };
+
+        let (pair, trampoline) = unsafe { build_closure_trampoline(wrapper) };
+        let data = (&*pair.1) as *const q::JSValue as *mut q::JSValue;
+        self.callbacks.lock().unwrap().push(pair);
+
+        let obj = unsafe {
+            let f = q::JS_NewCFunctionData(self.context, trampoline, 0, 0, 1, data);
+            OwnedJsValue::new(self.context, f)
+        };
+
+        let f = obj.try_into_function()?;
+        Ok(f)
+    }
+
+    /// Create a raw callback function
+    pub fn create_custom_callback_with_resource<R>(
+        &self,
+        callback: CustomCallbackWithResource<R>,
+        resource: R,
+    ) -> Result<JsFunction, ExecutionError>
+    where
+        R: Clone + UnwindSafe + 'static,
+    {
+        let context = self.context;
+        let wrapper = move |argc: c_int, argv: *mut q::JSValue| -> q::JSValue {
+            let resource = resource.clone();
+            let result = std::panic::catch_unwind(|| {
+                let arg_slice = unsafe { std::slice::from_raw_parts(argv, argc as usize) };
+                match callback(context, arg_slice, resource) {
                     Ok(Some(value)) => value,
                     Ok(None) => unsafe { q::JS_NewSpecialValue(TAG_UNDEFINED, 0) },
                     // TODO: better error reporting.

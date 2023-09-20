@@ -37,7 +37,7 @@ pub mod console;
 pub mod serde;
 mod value;
 
-use std::{convert::TryFrom, error, ffi::c_void, fmt};
+use std::{convert::TryFrom, error, ffi::c_void, fmt, panic::UnwindSafe};
 
 use bindings::{serialize_value, JSModuleLoaderFunc, JSModuleNormalizeFunc};
 pub use libquickjspp_sys::{JSContext, JSValue as RawJSValue};
@@ -438,6 +438,19 @@ impl Context {
         callback: CustomCallback,
     ) -> Result<JsFunction, ExecutionError> {
         self.wrapper.create_custom_callback(callback)
+    }
+
+    /// create a custom callback function
+    pub fn create_custom_callback_with_resource<R>(
+        &self,
+        callback: CustomCallbackWithResource<R>,
+        resource: R,
+    ) -> Result<JsFunction, ExecutionError>
+    where
+        R: Clone + UnwindSafe + 'static,
+    {
+        self.wrapper
+            .create_custom_callback_with_resource(callback, resource)
     }
 
     ///
